@@ -6,6 +6,7 @@ from uuid import UUID
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import msgpack as mp
+from numpy import inf
 from numpy.random import default_rng
 
 type ScalarPackable = None | bool | int | bytes | bytearray | str | memoryview | float
@@ -16,6 +17,8 @@ type Packable = DefaultPackable | CustomPackable | Serializable
 
 
 random = default_rng(123456789)
+
+INFINITY = inf
 
 
 def new_uuid():
