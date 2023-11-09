@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, Self
 from uuid import UUID, uuid4
 
-from des.errors import DefinitionError
+from pydes.errors import DefinitionError
 
 
 class Discrete(Enum):
