@@ -1,4 +1,3 @@
-import math
 from abc import ABC
 from collections.abc import Mapping
 from enum import Enum
@@ -6,6 +5,7 @@ from typing import Any, Self
 from uuid import UUID, uuid4
 
 from pydes.errors import DefinitionError
+from pydes.utils import INFINITY
 
 
 class Discrete(Enum):
@@ -50,7 +50,7 @@ class Model[S, I, O](ABC):
         to passivate in a certain state, meaning that it will never have an
         internal transition in this state.
         """
-        return math.inf
+        return INFINITY
 
     @classmethod
     def external_transition(cls, state: S, inputs: Input[I]) -> S:
