@@ -7,7 +7,7 @@ from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import msgpack as mp
 from numpy import inf
-from numpy.random import default_rng
+from numpy.random import PCG64DXSM, Generator
 
 type ScalarPackable = None | bool | int | bytes | bytearray | str | memoryview | float
 type StructuralPackable[T] = list[T] | tuple[T, ...] | dict[str, T]
@@ -15,10 +15,11 @@ type DefaultPackable = ScalarPackable | StructuralPackable[Packable]
 type CustomPackable = UUID
 type Packable = DefaultPackable | CustomPackable | Serializable
 
-
-random = default_rng(123456789)
-
+SEED = 123456789
 INFINITY = inf
+
+
+random = Generator(PCG64DXSM(SEED))
 
 
 def new_uuid():
