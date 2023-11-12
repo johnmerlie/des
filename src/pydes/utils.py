@@ -1,104 +1,97 @@
-from abc import ABC
-from dataclasses import Field, fields
-from enum import IntEnum, auto
-from typing import ClassVar, Self, overload
-from uuid import UUID
-from weakref import WeakKeyDictionary, WeakValueDictionary
-
-import msgpack as mp
-from numpy import inf
-from numpy.random import PCG64DXSM, Generator
-
-type ScalarPackable = None | bool | int | bytes | bytearray | str | memoryview | float
-type StructuralPackable[T] = list[T] | tuple[T, ...] | dict[str, T]
-type DefaultPackable = ScalarPackable | StructuralPackable[Packable]
-type CustomPackable = UUID
-type Packable = DefaultPackable | CustomPackable | Serializable
-
-SEED = 123456789
-INFINITY = inf
+import heapq
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 
 
-random = Generator(PCG64DXSM(SEED))
+@dataclass(frozen=True, slots=True, order=True)
+class QueueItem[T]:
+    priority: float = field(hash=False)
+    value: T = field(hash=True)
+
+    def __hash__(self) -> int:
+        return hash(self.value)
 
 
-def new_uuid():
-    return UUID(bytes=random.bytes(16))
+class MapQueue[T]:
+    heap: list[QueueItem[T]]
+    position: dict[T, int]
 
+    def __init__(self, data: Iterable[tuple[float, T]] | None = None):
+        if data is None:
+            data = []
+        self.heap = [QueueItem(*v) for v in data]
+        self.position = {}
+        self.__heapify()
 
-class Tag(IntEnum):
-    UUID = auto()
+    def __len__(self):
+        return len(self.heap)
 
+    def __heapify(self):
+        heapq.heapify(self.heap)
+        self.position = {item.value: pos for pos, item in enumerate(self.heap)}
+        if len(self.heap) != len(self.position):
+            raise ValueError("Duplicate Elements")
 
-class Serializable(ABC):
-    __dataclass_fields__: dict[str, Field[Packable]]
-    __tags: ClassVar[WeakKeyDictionary[type[Self], int]] = WeakKeyDictionary()
-    __registry: ClassVar[WeakValueDictionary[int, type[Self]]] = WeakValueDictionary()
+    def __set(self, item: QueueItem[T], position: int):
+        self.heap[position], self.position[item.value] = item, position
 
-    def __init_subclass__(cls) -> None:
-        super().__init_subclass__()
-        _tag = len(Tag) + len(Serializable.__registry)
-        Serializable.__tags[cls], Serializable.__registry[_tag] = _tag, cls
+    def __sift_down(self, start_pos: int, pos: int):
+        new_item = self.heap[pos]
+        while pos > start_pos:
+            parent = self.heap[parent_pos := (pos - 1) >> 1]
+            if not new_item < parent:
+                break
+            self.__set(parent, pos)
+            pos = parent_pos
+        self.__set(new_item, pos)
 
-    @staticmethod
-    def check_tag(tag: int):
-        return tag in Serializable.__registry
+    def __sift_up(self, pos: int):
+        end_pos = len(self.heap)
+        new_item = self.heap[pos]
+        child_pos = (pos << 1) + 1
+        while child_pos < end_pos:
+            child = self.heap[child_pos]
+            if (right_pos := child_pos + 1) < end_pos:
+                right = self.heap[right_pos]
+                if not child < right:
+                    child, child_pos = right, right_pos
+            self.__set(child, pos)
+            pos = child_pos
+            child_pos = (pos << 1) + 1
+        while pos > 0:
+            parent = self.heap[parent_pos := (pos - 1) >> 1]
+            if not new_item < parent:
+                break
+            self.__set(parent, pos)
+            pos = parent_pos
+        self.__set(new_item, pos)
 
-    @staticmethod
-    def get_tag(subcls: type):
-        return Serializable.__tags[subcls]
+    def push(self, value: T, priority: float):
+        if value in self.position:
+            return False
+        pos = len(self.heap)
+        self.heap.append(QueueItem(priority, value))
+        self.position[value] = pos
+        self.__sift_down(0, pos)
+        return True
 
-    @staticmethod
-    def get_subcls(tag: int):
-        return Serializable.__registry[tag]
+    def pop(self) -> T:
+        del self.position[value := self.heap[0].value]
+        if len(self.heap) == 1:
+            self.heap.pop()
+            return value
+        self.__set(self.heap.pop(), 0)
+        self.__sift_up(0)
+        return value
 
+    def update(self, value: T, new_value: T, priority: float):
+        pos = self.position.pop(value)
+        self.__set(QueueItem(priority, new_value), pos)
+        self.__sift_up(pos)
 
-def _as_dict(obj: Serializable) -> dict[str, Packable]:
-    return dict((fld.name, getattr(obj, fld.name)) for fld in fields(obj))
-
-
-@overload
-def serializer(obj: CustomPackable) -> mp.ExtType:
-    ...
-
-
-@overload
-def serializer(obj: Serializable) -> mp.ExtType:
-    ...
-
-
-@overload
-def serializer(obj: DefaultPackable) -> bytes:
-    ...
-
-
-def serializer(obj: Packable) -> bytes | mp.ExtType:
-    match obj:
-        case Serializable():
-            return mp.ExtType(
-                Serializable.get_tag(type(obj)),
-                serialize(_as_dict(obj)),
-            )
-        case UUID():
-            return mp.ExtType(Tag.UUID, obj.bytes)
-        case _:
-            raise TypeError(obj)
-
-
-def serialize(obj: Packable) -> bytes:
-    return mp.packb(obj, default=serializer)
-
-
-def deserializer(tag: int, msg: bytes) -> CustomPackable | Serializable:
-    match tag:
-        case Tag.UUID:
-            return UUID(bytes=msg)
-        case key if Serializable.check_tag(key):
-            subcls = Serializable.get_subcls(tag)
-            return subcls(**deserialize(msg))
-        case _:
-            raise TypeError((tag, msg))
-
-
-def deserialize(msg: bytes) -> Packable:
-    return mp.unpackb(msg, ext_hook=deserializer)  # type: ignore
+    def remove(self, value: T):
+        if (pos := self.position.pop(value)) == len(self.heap) - 1:
+            self.heap.pop()
+            return
+        self.__set(self.heap.pop(), pos)
+        self.__sift_up(pos)
