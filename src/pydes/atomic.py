@@ -1,4 +1,5 @@
 from functools import partial
+from typing import Any
 
 from pydantic import Field
 
@@ -19,14 +20,14 @@ class Atomic(Model):
         """
         return INFINITY
 
-    def external_transition(self, inputs: Input):
+    def external_transition(self, inputs: Input[Any]) -> None:
         """Override this function to implement custom external transition
 
         Default Implementation returns `state` unchanged.
         """
         pass
 
-    def confluent_transition(self, inputs: Input):
+    def confluent_transition(self, inputs: Input[Any]):
         """Override this function to implement custom confluent transition
 
         Default Implementation processes `internal_transition` followed by
@@ -49,7 +50,7 @@ class Atomic(Model):
         """
         return True
 
-    def output(self) -> Output:
+    def output(self) -> Output[Any]:
         """Override this function to implement custom output function
 
         Default Implementation returns empty map representing no output

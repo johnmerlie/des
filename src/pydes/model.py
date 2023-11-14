@@ -1,38 +1,9 @@
 from abc import ABC
-from typing import ClassVar, Self, overload
 
 from pydantic import model_validator
 
 from pydes.core import Field, Mutable
 from pydes.utils import SimulationTime
-
-
-class Channel(ABC):
-    name: str
-
-    def __set_name__(self, owner: type, name: str):
-        self.name = name
-
-    @overload
-    def __get__(self, obj: object, objtype: type | None = None) -> str:
-        ...
-
-    @overload
-    def __get__(self, obj: None, objtype: type | None = None) -> Self:
-        ...
-
-    def __get__(self, obj: object | None, objtype: type | None = None):
-        if obj is None:
-            return self
-        return self.name
-
-
-class InputChannel(Channel):
-    direction: ClassVar[bool] = True
-
-
-class OutputChannel(Channel):
-    direction: ClassVar[bool] = False
 
 
 class Model(Mutable, ABC):

@@ -2,7 +2,7 @@ import pickle
 from abc import ABC
 from collections.abc import Mapping
 from math import inf
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, ClassVar, Self, overload
 from uuid import UUID
 
 from annotated_types import Ge
@@ -31,7 +31,81 @@ def model_deserialize(data: bytes) -> Any:
     return pickle.loads(data)
 
 
+class Channel:
+    name: str
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+class SingleChannel(ABC):
+    _value: Channel
+
+    def __set_name__(self, owner: type, name: str):
+        self._value = Channel(name)
+
+    @overload
+    def __get__(self, obj: object, objtype: type | None = None) -> Channel:
+        ...
+
+    @overload
+    def __get__(self, obj: None, objtype: type | None = None) -> Self:
+        ...
+
+    def __get__(self, obj: object | None, objtype: type | None = None):
+        if obj is None:
+            return self
+        return self._value
+
+
+class MultiChannel(ABC):
+    count: int
+    _value: tuple[Channel, ...]
+
+    def __init__(self, count: int):
+        self.count = count
+
+    def __set_name__(self, owner: type, name: str):
+        self._value = tuple(Channel(f"{name}[{i}]") for i in range(self.count))
+
+    def __get__(self, obj: object | None, objtype: type | None = None):
+        if obj is None:
+            return self
+        return self._value
+
+    def __getitem__(self, key: int):
+        return self._value[key]
+
+
+class SingleChannelInput(SingleChannel):
+    direction: ClassVar[bool] = True
+
+
+class MultiChannelInput(MultiChannel):
+    direction: ClassVar[bool] = True
+
+
+class SingleChannelOutput(SingleChannel):
+    direction: ClassVar[bool] = False
+
+
+class MultiChannelOutput(MultiChannel):
+    direction: ClassVar[bool] = False
+
+
 class Serializiable(BaseModel, ABC):
+    model_config = ConfigDict(
+        extra="forbid",
+        ignored_types=(
+            SingleChannelInput,
+            MultiChannelInput,
+            SingleChannelOutput,
+            MultiChannelOutput,
+        ),
+    )
     id: UUID = Field(default_factory=model_id, frozen=True, kw_only=True)
 
     def model_serialize(self):
@@ -44,19 +118,17 @@ class Serializiable(BaseModel, ABC):
 
 class Mutable(Serializiable):
     model_config = ConfigDict(
-        extra="forbid",
         validate_assignment=True,
     )
 
 
 class Immutable(Serializiable):
     model_config = ConfigDict(
-        extra="forbid",
         frozen=True,
     )
 
 
 type Time = Annotated[float, Ge(0)]
 
-type Input = Mapping[str, Any]
-type Output = Mapping[str, Any]
+type Input[V] = Mapping[Channel, V]
+type Output[V] = Mapping[Channel, V]
