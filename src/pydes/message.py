@@ -1,11 +1,10 @@
+from typing import Any
 from uuid import UUID
 
-from .core import Field, Immutable
-from .utils import new_uuid
+from .core import Immutable
 
 
 class Message(Immutable):
-    id: UUID = Field(default_factory=new_uuid, kw_only=True)
     destination: UUID
     timestamp: int
-    data: str
+    content: Any
