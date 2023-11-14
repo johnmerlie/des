@@ -1,18 +1,30 @@
 import heapq
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import field
+
+from pydantic.dataclasses import dataclass
+
+from pydes.core import INFINITY, Time
+
+
+@dataclass(order=True)
+class SimulationTime:
+    last: Time = field(default=0, compare=False)
+    next: Time = field(default=INFINITY, compare=True)
+
+    def __post_init__(self):
+        assert self.next > self.last, f"{self.next=} must be greater than {self.last=}"
 
 
 @dataclass(frozen=True, slots=True, order=True)
 class QueueItem[T]:
-    priority: float = field(hash=False)
-    value: T = field(hash=True)
-
-    def __hash__(self) -> int:
-        return hash(self.value)
+    priority: float = field(compare=True, hash=False)
+    value: T = field(compare=True, hash=True)
 
 
 class MapQueue[T]:
+    """Updated version of networkx.utils.mapping_queue.MappingQueue"""
+
     heap: list[QueueItem[T]]
     position: dict[T, int]
 
@@ -25,6 +37,9 @@ class MapQueue[T]:
 
     def __len__(self):
         return len(self.heap)
+
+    def __contains__(self, value: T):
+        return value in self.position
 
     def __heapify(self):
         heapq.heapify(self.heap)
@@ -84,9 +99,9 @@ class MapQueue[T]:
         self.__sift_up(0)
         return value
 
-    def update(self, value: T, new_value: T, priority: float):
+    def update(self, value: T, priority: float):
         pos = self.position.pop(value)
-        self.__set(QueueItem(priority, new_value), pos)
+        self.__set(QueueItem(priority, value), pos)
         self.__sift_up(pos)
 
     def remove(self, value: T):
