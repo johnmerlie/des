@@ -5,10 +5,10 @@ import pytest
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
-from pydes.atomic import Atomic
-from pydes.channel import InputChannel, OutputChannel
+from pydes.atomic import Atomic, StateConstant, StateVariable
 from pydes.core import INFINITY, Input, Time, random
 from pydes.errors import InvalidInputError, InvalidStateError
+from pydes.model import InputChannel, OutputChannel
 
 
 @pytest.fixture
@@ -22,17 +22,13 @@ def monorail_model():
 
 @pytest.fixture
 def trafficlight_model():
-    @dataclass
-    class TrafficLightState:
-        status: Literal["red", "yellow", "green", "manual"] = Field("red")
-
-    class TrafficLight(Atomic[TrafficLightState]):
+    class TrafficLight(Atomic):
+        status: Literal["red", "yellow", "green", "manual"] = StateVariable("red")
         interrupt = InputChannel()
         observed = OutputChannel()
 
-        @classmethod
-        def time_advance(cls, state: TrafficLightState):
-            match state.status:
+        def time_advance(self):
+            match self.status:
                 case "red":
                     return 60.0
                 case "yellow":
@@ -42,174 +38,212 @@ def trafficlight_model():
                 case "manual":
                     return INFINITY
 
-        @classmethod
-        def external_transition(cls, state: TrafficLightState, inputs: Input):
-            match cls.interrupt.get(inputs):
+        def external_transition(self, inputs: Input):
+            match inputs[self.interrupt]:
                 case "toManual":
-                    state.status = "manual"
+                    self.status = "manual"
                 case "toAutomatic":
-                    if state.status == "manual":
-                        state.status = "red"
+                    if self.status == "manual":
+                        self.status = "red"
                 case other:
                     raise InvalidInputError(other)
-            return state
 
-        @classmethod
-        def internal_transition(cls, state: TrafficLightState):
-            match state.status:
+        def internal_transition(self):
+            match self.status:
                 case "red":
-                    state.status = "green"
+                    self.status = "green"
                 case "green":
-                    state.status = "yellow"
+                    self.status = "yellow"
                 case "yellow":
-                    state.status = "red"
-                case other:
-                    raise InvalidStateError(other)
-            return state
-
-        @classmethod
-        def output(cls, state: TrafficLightState):
-            match state.status:
-                case "red":
-                    return cls.observed.put("grey")
-                case "green":
-                    return cls.observed.put("yellow")
-                case "yellow":
-                    return cls.observed.put("grey")
+                    self.status = "red"
                 case other:
                     raise InvalidStateError(other)
 
-    @dataclass
-    class PolicemanState:
-        status: Literal["idle", "working"]
+        def output(self):
+            match self.status:
+                case "red":
+                    return {self.observed: "grey"}
+                case "green":
+                    return {self.observed: "yellow"}
+                case "yellow":
+                    return {self.observed: "grey"}
+                case other:
+                    raise InvalidStateError(other)
 
-    class Policeman(Atomic[PolicemanState]):
+    TrafficLight()
+
+    class Policeman(Atomic):
+        status: Literal["idle", "working"] = StateVariable("idle")
         interrupt = OutputChannel()
 
-        @classmethod
-        def time_advance(cls, state: PolicemanState):
+        def time_advance(self):
             """
             Time-Advance Function.
             """
-            match state.status:
+            match self.status:
                 case "idle":
                     return 200
                 case "working":
                     return 100
-            raise InvalidStateError(state)
 
-        @classmethod
-        def internal_transition(cls, state: PolicemanState):
+        def internal_transition(self):
             """
             Internal Transition Function.
             The policeman works forever, so only one mode.
             """
 
-            match state.status:
+            match self.status:
                 case "idle":
-                    state.status = "working"
+                    self.status = "working"
                 case "working":
-                    state.status = "idle"
-            return state
+                    self.status = "idle"
 
-        @classmethod
-        def output(cls, state: PolicemanState):
+        def output(self):
             """
             Output Funtion.
             """
-            match state.status:
+            match self.status:
                 case "idle":
-                    return cls.interrupt.put("toManual")
+                    return {self.interrupt: "toManual"}
                 case "working":
-                    return cls.interrupt.put("toAutomatic")
-            raise InvalidStateError(state)
+                    return {self.interrupt: "toAutomatic"}
 
 
 @pytest.fixture
 def queueing_model():
     @dataclass
-    class CollectorState:
-        events: list[Any] = field(default_factory=list)
-
-    class Collector(Atomic[CollectorState]):
-        collect = InputChannel()
-
-        @classmethod
-        def external_transition(cls, state: CollectorState, inputs: Input) -> CollectorState:
-            state.events.append(cls.collect.get(inputs))
-            return state
-
-    @dataclass
-    class GeneratorState:
-        remaining: int
-        size_param: float = Field(frozen=True)
-
-    @dataclass
     class Job:
         size: int
 
-    class Generator(Atomic[GeneratorState]):
+    class Generator(Atomic):
+        remaining: int = StateVariable()
+        size_param: float = StateConstant()
         generate = OutputChannel()
 
-        @classmethod
-        def time_advance(cls, state: GeneratorState) -> Time:
-            if state.remaining == 0:
+        def time_advance(self) -> Time:
+            if self.remaining == 0:
                 return INFINITY
             else:
                 return random.random()
 
-        @classmethod
-        def internal_transition(cls, state: GeneratorState) -> GeneratorState:
-            state.remaining -= 1
-            return state
+        def internal_transition(self):
+            self.remaining -= 1
 
-        @classmethod
-        def output(cls, state: GeneratorState):
-            size = max(1, int(random.normal(state.size_param, 5)))
-            return cls.generate.put(Job(size))
+        def output(self):
+            size = max(1, int(random.normal(self.size_param, 5)))
+            return {self.generate: Job(size)}
 
-    @dataclass
-    class ProcessorState:
-        event: Job | None = field(default=None)
-
-    class Processor(Atomic[ProcessorState]):
+    class Processor(Atomic):
+        event: Job | None = StateVariable(None)
+        speed: float = StateConstant()
         receive = InputChannel()
         send = OutputChannel()
         finish = OutputChannel()
 
-        # def __init__(self, nr, proc_param):
-        #     AtomicDEVS.__init__(self, "Processor_%i" % nr)
-
-        #     self.state = ProcessorState()
-        #     self.in_proc = self.addInPort("in_proc")
-        #     self.out_proc = self.addOutPort("out_proc")
-        #     self.out_finished = self.addOutPort("out_finished")
-
-        #     # Define the parameters of the model
-        #     self.speed = proc_param
-        #     self.nr = nr
-
-        @classmethod
-        def internal_transition(cls, state: ProcessorState):
-            state.event = None
-            return state
-
-        @classmethod
-        def external_transition(cls, state: ProcessorState, inputs: Input):
-            state.event = cls.receive.get(inputs)
-            return state
-
-        @classmethod
-        def time_advance(cls, state: ProcessorState):
-            if state.event is not None:
-                return 20.0 + max(1.0, state.event.size)
+        def time_advance(self):
+            if self.event is not None:
+                return 20.0 + max(1.0, self.event.size)
             else:
                 return INFINITY
 
-        @classmethod
-        def output(cls, state: ProcessorState):
-            return cls.send.put(state.event) | cls.finish.put(state.event)
+        def internal_transition(self):
+            self.event = None
+
+        def external_transition(self, inputs: Input):
+            self.event = inputs[self.receive]
+
+        def output(self):
+            return {self.send: self.event, self.finish: self.id}
+
+    class Collector(Atomic):
+        events: list[Job] = StateVariable(default_factory=list)
+        collect = InputChannel()
+
+        def external_transition(self, inputs: Input):
+            self.events.append(inputs[self.collect])
+
+    # Define the state of the queue as a structured object
+    class QueueState:
+        def __init__(self, outputs):
+            # Keep a list of all idle processors
+            self.idle_procs = range(outputs)
+            # Keep a list that is the actual queue data structure
+            self.queue = []
+            # Keep the process that is currently being processed
+            self.processing = None
+            # Time remaining for this event
+            self.remaining_time = float("inf")
+
+    class Queue(Atomic):
+        queue: list[Any] = StateVariable(default_factory=list)
+        idle_processors: list[Any] = StateVariable(default_factory=list)
+        processing_time: float = StateConstant(1.0)
+
+        enqueue = InputChannel()
+        finish = InputChannel()
+
+        def __init__(self, outputs):
+            AtomicDEVS.__init__(self, "Queue")
+            # Fix the time needed to process a single event
+            self.processing_time = 1.0
+            self.state = QueueState(outputs)
+
+            # Create 'outputs' output ports
+            # 'outputs' is a structural parameter!
+            self.out_proc = []
+            for i in range(outputs):
+                self.out_proc.append(self.addOutPort("proc_%i" % i))
+
+            # Add the other ports: incoming events and finished event
+            self.in_event = self.addInPort("in_event")
+            self.in_finish = self.addInPort("in_finish")
+
+        def time_advance(self) -> Time:
+            if self.queue and self.idle_processors:
+                return self.processing_time
+            else:
+                return INFINITY
+
+        def internal_transition(self):
+            self.idle_processors.pop(0)
+            if self.queue and self.idle_processors:
+                self.processing = self.queue.pop(0)
+            else:
+                self.processing = None
+
+        # def intTransition(self):
+        #     # Is only called when we are outputting an event
+        #     # Pop the first idle processor and clear processing event
+        #     self.state.idle_procs.pop(0)
+        #     if self.state.queue and self.state.idle_procs:
+        #         # There are still queued elements, so continue
+        #         self.state.processing = self.state.queue.pop(0)
+        #         self.state.remaining_time = self.processing_time
+        #     else:
+        #         # No events left to process, so become idle
+        #         self.state.processing = None
+        #         self.state.remaining_time = float("inf")
+        #     return self.state
+
+        def external_transition(self, inputs: Input):
+            if self.finish in inputs:
+                self.idle_processors.append(inputs[self.finish])
+                if not self.processing and self.queue:
+                    # Process first task in queue
+                    self.processing = self.queue.pop(0)
+            elif self.enqueue in inputs:
+                # Processing an incoming event
+                if self.idle_processors and not self.processing:
+                    # Process when idle processors
+                    self.processing = inputs[self.enqueue]
+                else:
+                    # No idle processors, so queue it
+                    self.queue.append(inputs[self.enqueue])
+
+        # def output(self):
+        #     ...
 
         # def outputFnc(self):
-        #     # Output the processed event and signal as finished
-        #     return {self.out_proc: self.state.evt, self.out_finished: self.nr}
+        #     # Output the event to the processor
+        #     port = self.out_proc[self.state.idle_procs[0]]
+        #     return {port: self.state.processing}
