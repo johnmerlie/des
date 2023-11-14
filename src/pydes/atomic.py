@@ -1,14 +1,17 @@
+from functools import partial
+
 from pydantic import Field
 
 from pydes.core import INFINITY, Input, Output, Time
 from pydes.model import Model
 
+StateVariable = partial(Field, frozen=False)
 
-class Atomic[S](Model):
-    state: S = Field(alias="initial_state")
+StateConstant = partial(Field, frozen=True)
 
-    @classmethod
-    def time_advance(cls, state: S) -> Time:
+
+class Atomic(Model):
+    def time_advance(self) -> Time:
         """Override this function to implement custom time advance
 
         Default implementation returns infinity, i.e. the model will
@@ -16,43 +19,37 @@ class Atomic[S](Model):
         """
         return INFINITY
 
-    @classmethod
-    def external_transition(cls, state: S, inputs: Input) -> S:
+    def external_transition(self, inputs: Input):
         """Override this function to implement custom external transition
 
         Default Implementation returns `state` unchanged.
         """
-        return state
+        pass
 
-    @classmethod
-    def confluent_transition(cls, state: S, inputs: Input):
+    def confluent_transition(self, inputs: Input):
         """Override this function to implement custom confluent transition
 
         Default Implementation processes `internal_transition` followed by
         `external_transition`
         """
-        state = cls.internal_transition(state)
-        state = cls.external_transition(state, inputs)
-        return state
+        self.internal_transition()
+        self.external_transition(inputs)
 
-    @classmethod
-    def internal_transition(cls, state: S) -> S:
+    def internal_transition(self):
         """Override this function to implement custom internal transition
 
         Default Implementation returns `state` unchanged.
         """
-        return state
+        pass
 
-    @classmethod
-    def condition(cls, state: S) -> bool:
+    def condition(self) -> bool:
         """Override this function to implement custom condition function
 
         Default Implementation returns True
         """
         return True
 
-    @classmethod
-    def output(cls, state: S) -> Output:
+    def output(self) -> Output:
         """Override this function to implement custom output function
 
         Default Implementation returns empty map representing no output
