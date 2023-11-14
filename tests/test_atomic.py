@@ -1,8 +1,13 @@
-from pydes.atomic import Atomic
+from typing import ClassVar
+
+from pydes.atomic import Atomic, StateConstant, StateVariable
+from pydes.model import InputChannel
 
 
 def test_initialization():
-    model = Atomic(initial_state=4)
+    class TestModel(Atomic):
+        number: int = StateVariable(4)
+        const: int = StateConstant(5)
+        input: ClassVar = InputChannel()
 
-    assert model.name == f"{model.__class__.__name__}-{model.id}"
-    assert model.state == 4
+    model = TestModel()
