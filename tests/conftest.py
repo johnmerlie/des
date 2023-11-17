@@ -248,6 +248,7 @@ def queueing_model():
                     raise InvalidInputError(inputs)
 
         def output(self):
+            self.idle_processors[0]
             self.outputs[0]
             return {}
 

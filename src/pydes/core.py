@@ -3,14 +3,14 @@ from abc import ABC
 from collections.abc import Mapping
 from functools import cached_property
 from math import inf
-from typing import Annotated, Any, ClassVar, Protocol, Self
+from typing import Annotated, Any, NoReturn
 from uuid import UUID
+from weakref import WeakValueDictionary
 
 from annotated_types import Ge
 from numpy.random import PCG64DXSM, Generator
 from pydantic import BaseModel, ConfigDict, Field
-
-__all__ = "Mutable", "Immutable", "Field", "random", "model_id", "INFINITY"
+from typing_extensions import ClassVar, Literal, Protocol, Self, final, overload
 
 SEED = 12345
 
@@ -36,9 +36,14 @@ class HasID(Protocol):
     id: UUID
 
 
+type ChType = Channel
+
+
 class Channel(ABC):
     direction: ClassVar[bool]
     name: str
+    owner: HasID
+    links: WeakValueDictionary[UUID, HasID]
     """
     Parameters
     ----------
@@ -49,6 +54,16 @@ class Channel(ABC):
     def __set_name__(self, objtype: type, name: str):
         self.name = name
 
+    def __get__(self, obj: HasID | None, objtype: type | None = None) -> Self:
+        if obj is not None:
+            self.owner = obj
+
+        return self
+
+    @cached_property
+    def oid(self):
+        return self.owner.id
+
     @cached_property
     def is_input(self):
         return self.direction is True
@@ -57,55 +72,44 @@ class Channel(ABC):
     def is_output(self):
         return self.direction is False
 
+    def _connect(self, other: ChType):
+        self.links[other.owner.id], other.links[self.owner.id] = other.owner, self.owner
 
+    def connect(self, other: ChType):
+        match self, other:
+            case (InputChannel(), OutputChannel()) | (InputChannel(), OutputChannel()):
+                return self._connect(other)
+            case _:
+                raise ValueError(f"Invalid object pair for linking: {self} <> {other}")
+
+    def __lshift__(self, other: ChType):
+        match self, other:
+            case InputChannel(), OutputChannel():
+                self.connect(other)
+                return other.oid, self.oid
+            case _:
+                raise ValueError(f"Invalid object pair for linking: {self} << {other}")
+
+    def __rshift__(self, other: ChType):
+        match self, other:
+            case OutputChannel(), InputChannel():
+                self.connect(other)
+                return self.oid, other.oid
+            case _:
+                raise ValueError(f"Invalid object pair for linking: {self} >> {other}")
+
+
+@final
 class InputChannel(Channel):
-    direction: ClassVar[bool] = True
-    target: UUID
-    sources: set[UUID]
-
-    def __get__(self, obj: HasID | None, objtype: type | None = None) -> Self:
-        if obj is not None:
-            self.target = obj.id
-
-        return self
-
-    def __lshift__(self, other: Any):
-        if not isinstance(other, OutputChannel):
-            raise TypeError(f"invalid type for comparison: type({other})={type(other)}")
-
-        self.sources.add(source := other.source)
-        other.targets.add(target := self.target)
-
-        return source, target
-
-    def __getitem__(self, key: UUID):
-        if key not in self.sources:
-            raise KeyError(f"key: {key} does not exist in sources")
-
-
-class OutputChannel(Channel):
-    direction: ClassVar[bool] = False
-    source: UUID
-    targets: set[UUID]
-
-    def __get__(self, obj: HasID | None, objtype: type | None = None) -> Self:
-        if obj is not None:
-            self.source = obj.id
-
-        return self
-
-    def __rshift__(self, other: Any):
-        if not isinstance(other, InputChannel):
-            raise TypeError(f"invalid type for comparison: type({other})={type(other)}")
-
-        other.sources.add(source := self.source)
-        self.targets.add(target := other.target)
-
-        return source, target
-
+    direction = True
     # def __getitem__(self, key: UUID):
-    #     if key not in self.targets:
-    #         raise KeyError(f"key: {key} does not exist in targets")
+    #     if key not in self.sources:
+    #         raise KeyError(f"key: {key} does not exist in sources")
+
+
+@final
+class OutputChannel(Channel):
+    direction = False
 
 
 # class MultiChannel(ABC):
