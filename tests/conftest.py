@@ -1,19 +1,10 @@
-from functools import singledispatch, singledispatchmethod
-from typing import Any, Literal
+from typing import Literal
 
 import pytest
 from pydantic.dataclasses import dataclass
 
 from pydes.atomic import Atomic, StateConstant, StateVariable
-from pydes.core import (
-    INFINITY,
-    Input,
-    MultiChannelOutput,
-    SingleChannelInput,
-    SingleChannelOutput,
-    Time,
-    random,
-)
+from pydes.core import INFINITY, Input, InputChannel, OutputChannel, Time, random
 from pydes.errors import InvalidInputError, InvalidStateError
 
 # @pytest.fixture
@@ -31,8 +22,8 @@ def trafficlight_model():
 
     class TrafficLight(Atomic):
         status: TrafficLightStatus = StateVariable("red")
-        interrupt = SingleChannelInput()
-        observed = SingleChannelOutput()
+        interrupt = InputChannel()
+        observed = OutputChannel()
 
         def time_advance(self):
             match self.status:
@@ -83,7 +74,7 @@ def trafficlight_model():
 
     class Policeman(Atomic):
         status: PolicemanStatus = StateVariable("idle")
-        interrupt = SingleChannelOutput()
+        interrupt = OutputChannel()
 
         def time_advance(self):
             """
@@ -127,7 +118,7 @@ def queueing_model():
     class Generator(Atomic):
         remaining: int = StateVariable()
         size_param: float = StateConstant()
-        generate = SingleChannelOutput()
+        generate = OutputChannel()
 
         def time_advance(self) -> Time:
             if self.remaining == 0:
@@ -145,9 +136,9 @@ def queueing_model():
     class Processor(Atomic):
         event: Job | None = StateVariable(None)
         speed: float = StateConstant()
-        receive = SingleChannelInput()
-        send = SingleChannelOutput()
-        finish = SingleChannelOutput()
+        receive = InputChannel()
+        send = OutputChannel()
+        finish = OutputChannel()
 
         def time_advance(self):
             if self.event is not None:
@@ -166,7 +157,7 @@ def queueing_model():
 
     class Collector(Atomic):
         events: list[Job] = StateVariable(default_factory=list)
-        collect = SingleChannelInput()
+        collect = InputChannel()
 
         def external_transition(self, inputs: Input[Job]):
             self.events.append(inputs[self.collect])
@@ -190,9 +181,10 @@ def queueing_model():
 
         processing_time: float = StateConstant(1.0)
 
-        enqueue = SingleChannelInput()
-        finish = SingleChannelInput()
-        outputs = MultiChannelOutput(5)
+        enqueue = InputChannel()
+        finish = InputChannel()
+        outputs = OutputChannel()
+        # outputs = MultiChannelOutput(5)
 
         # def __init__(self, outputs):
         # AtomicDEVS.__init__(self, "Queue")
@@ -237,34 +229,29 @@ def queueing_model():
         #         self.state.remaining_time = float("inf")
         #     return self.state
 
-        @singledispatchmethod
-        def external_transition(self, inputs: Input[Any]):
-            pass
-
-        @external_transition.register
-        def _(self, inputs: Input[Processor]):
-            self.idle_processors.append(inputs[self.finish])
-            if not self.active_job and self.queued_jobs:
-                # Process first task in queue
-                self.active_job = self.queued_jobs.pop(0)
-
-        @external_transition.register
-        def _(self, inputs: Input[Job]):
-            # Processing an incoming event
-            if self.idle_processors and not self.active_job:
-                # Process when idle processors
-                self.active_job = inputs[self.enqueue]
-            else:
-                # No idle processors, so queue it
-                self.queued_jobs.append(inputs[self.enqueue])
+        def external_transition(self, inputs: Input[Processor | Job]):
+            match inputs:
+                case {self.finish: Processor() as processor}:
+                    self.idle_processors.append(processor)
+                    if not self.active_job and self.queued_jobs:
+                        # Process first task in queue
+                        self.active_job = self.queued_jobs.pop(0)
+                case {self.enqueue: Job() as job}:
+                    # Processing an incoming event
+                    if self.idle_processors and not self.active_job:
+                        # Process when idle processors
+                        self.active_job = job
+                    else:
+                        # No idle processors, so queue it
+                        self.queued_jobs.append(job)
+                case _:
+                    raise InvalidInputError(inputs)
 
         def output(self):
             self.outputs[0]
-            # return {}
+            return {}
 
         # def outputFnc(self):
         #     # Output the event to the processor
         #     port = self.out_proc[self.state.idle_procs[0]]
         #     return {port: self.state.processing}
-
-    Queue().external_transition()

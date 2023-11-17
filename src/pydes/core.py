@@ -1,8 +1,9 @@
 import pickle
 from abc import ABC
 from collections.abc import Mapping
+from functools import cached_property
 from math import inf
-from typing import Annotated, Any, ClassVar, Self, overload
+from typing import Annotated, Any, ClassVar, Protocol, Self
 from uuid import UUID
 
 from annotated_types import Ge
@@ -31,79 +32,123 @@ def model_deserialize(data: bytes) -> Any:
     return pickle.loads(data)
 
 
-class Channel:
-    name: str
+class HasID(Protocol):
+    id: UUID
 
-    def __init__(self, name: str):
+
+class Channel(ABC):
+    direction: ClassVar[bool]
+    name: str
+    """
+    Parameters
+    ----------
+    direction : bool
+        True for input, False for output
+    """
+
+    def __set_name__(self, objtype: type, name: str):
         self.name = name
 
-    def __hash__(self):
-        return hash(self.name)
+    @cached_property
+    def is_input(self):
+        return self.direction is True
+
+    @cached_property
+    def is_output(self):
+        return self.direction is False
 
 
-class SingleChannel(ABC):
-    _value: Channel
-
-    def __set_name__(self, owner: type, name: str):
-        self._value = Channel(name)
-
-    @overload
-    def __get__(self, obj: object, objtype: type | None = None) -> Channel:
-        ...
-
-    @overload
-    def __get__(self, obj: None, objtype: type | None = None) -> Self:
-        ...
-
-    def __get__(self, obj: object | None, objtype: type | None = None):
-        if obj is None:
-            return self
-        return self._value
-
-
-class MultiChannel(ABC):
-    count: int
-    _value: tuple[Channel, ...]
-
-    def __init__(self, count: int):
-        self.count = count
-
-    def __set_name__(self, owner: type, name: str):
-        self._value = tuple(Channel(f"{name}[{i}]") for i in range(self.count))
-
-    def __get__(self, obj: object | None, objtype: type | None = None):
-        if obj is None:
-            return self
-        return self._value
-
-    def __getitem__(self, key: int):
-        return self._value[key]
-
-
-class SingleChannelInput(SingleChannel):
+class InputChannel(Channel):
     direction: ClassVar[bool] = True
+    target: UUID
+    sources: set[UUID]
+
+    def __get__(self, obj: HasID | None, objtype: type | None = None) -> Self:
+        if obj is not None:
+            self.target = obj.id
+
+        return self
+
+    def __lshift__(self, other: Any):
+        if not isinstance(other, OutputChannel):
+            raise TypeError(f"invalid type for comparison: type({other})={type(other)}")
+
+        self.sources.add(source := other.source)
+        other.targets.add(target := self.target)
+
+        return source, target
+
+    def __getitem__(self, key: UUID):
+        if key not in self.sources:
+            raise KeyError(f"key: {key} does not exist in sources")
 
 
-class MultiChannelInput(MultiChannel):
-    direction: ClassVar[bool] = True
-
-
-class SingleChannelOutput(SingleChannel):
+class OutputChannel(Channel):
     direction: ClassVar[bool] = False
+    source: UUID
+    targets: set[UUID]
+
+    def __get__(self, obj: HasID | None, objtype: type | None = None) -> Self:
+        if obj is not None:
+            self.source = obj.id
+
+        return self
+
+    def __rshift__(self, other: Any):
+        if not isinstance(other, InputChannel):
+            raise TypeError(f"invalid type for comparison: type({other})={type(other)}")
+
+        other.sources.add(source := self.source)
+        self.targets.add(target := other.target)
+
+        return source, target
+
+    # def __getitem__(self, key: UUID):
+    #     if key not in self.targets:
+    #         raise KeyError(f"key: {key} does not exist in targets")
 
 
-class MultiChannelOutput(MultiChannel):
-    direction: ClassVar[bool] = False
+# class MultiChannel(ABC):
+#     count: int
+#     _value: tuple[Channel, ...]
+
+#     def __init__(self, count: int):
+#         self.count = count
+
+#     def __set_name__(self, owner: type, name: str):
+#         self._value = tuple(Channel(f"{name}[{i}]") for i in range(self.count))
+
+#     def __get__(self, obj: object | None, objtype: type | None = None):
+#         if obj is None:
+#             return self
+#         return self._value
+
+#     def __getitem__(self, key: int):
+#         return self._value[key]
+
+
+# class SingleChannelInput(SingleChannel):
+#     direction: ClassVar[bool] = True
+
+
+# class MultiChannelInput(MultiChannel):
+#     direction: ClassVar[bool] = True
+
+
+# class SingleChannelOutput(SingleChannel):
+#     direction: ClassVar[bool] = False
+
+
+# class MultiChannelOutput(MultiChannel):
+#     direction: ClassVar[bool] = False
 
 
 class Serializiable(BaseModel, ABC):
     model_config = ConfigDict(
         extra="forbid",
         ignored_types=(
-            SingleChannelInput,
-            MultiChannelInput,
-            SingleChannelOutput,
-            MultiChannelOutput,
+            InputChannel,
+            OutputChannel,
         ),
     )
     id: UUID = Field(default_factory=model_id, frozen=True, kw_only=True)
@@ -130,5 +175,5 @@ class Immutable(Serializiable):
 
 type Time = Annotated[float, Ge(0)]
 
-type Input[V] = Mapping[Channel, V]
-type Output[V] = Mapping[Channel, V]
+type Input[V] = Mapping[InputChannel, V]
+type Output[V] = Mapping[OutputChannel, V]
