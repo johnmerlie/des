@@ -1,19 +1,26 @@
+from __future__ import annotations
+
 from abc import ABC
+from uuid import UUID
 
-from pydantic import model_validator
+from pydantic import ConfigDict, Field, model_validator
 
-from pydes.core import Field, Mutable
+from pydes.channel import InputChannel, OutputChannel
+from pydes.core import Mutable, model_id
 from pydes.utils import SimulationTime
 
 
 class Model(Mutable, ABC):
+    model_config = ConfigDict(ignored_types=(InputChannel, OutputChannel))
+
+    id: UUID = Field(default_factory=model_id, frozen=True)
     time: SimulationTime = Field(default_factory=SimulationTime, frozen=True)
     name: str = Field(
         default=None,
         frozen=True,
         description="The Model name used for labelling, set automatically if not provided.",
     )
-    parent: "Model" = Field(
+    parent: Model = Field(
         default=None,
         description="The parent model in the model heirarchy",
     )
