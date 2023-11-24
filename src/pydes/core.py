@@ -1,12 +1,11 @@
 import pickle
-from abc import ABC
 from math import inf
 from typing import Annotated, Any
 from uuid import UUID
 
 from annotated_types import Ge
 from numpy.random import PCG64DXSM, Generator
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Self
 
 type Time = Annotated[float, Ge(0)]
@@ -18,25 +17,25 @@ INFINITY = inf
 random = Generator(PCG64DXSM(SEED))
 
 
-def model_id():
+def new_id():
     return UUID(bytes=random.bytes(16))
 
 
-def model_serialize(model: Any) -> bytes:
+def serialize(model: Any) -> bytes:
     return pickle.dumps(model)
 
 
-def model_deserialize(data: bytes) -> Any:
+def deserialize(data: bytes) -> Any:
     return pickle.loads(data)
 
 
-class Serializable(BaseModel, ABC):
+class Serializable(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
 
     def model_serialize(self):
-        return model_serialize(self)
+        return serialize(self)
 
     @classmethod
     def model_deserialize(cls, data: bytes) -> Self:
@@ -51,5 +50,12 @@ class Mutable(Serializable):
 
 class Immutable(Serializable):
     model_config = ConfigDict(
+        frozen=True,
+    )
+
+
+class Base(Mutable):
+    id: UUID = Field(
+        default_factory=new_id,
         frozen=True,
     )
