@@ -1,7 +1,7 @@
-from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import Field
+from pydantic_core import PydanticUndefined
 
 from pydes.channel import Inputs, Outputs
 from pydes.core import INFINITY, Time
@@ -13,8 +13,29 @@ __all__ = (
     "Atomic",
 )
 
-StateVariable = partial(Field, frozen=False)
-StateConstant = partial(Field, frozen=True)
+Unset: Any = PydanticUndefined
+
+
+def StateVariable(
+    default: Any = Unset,
+    default_factory: Callable[[], Any] | None = Unset,
+):
+    return Field(
+        default=default,
+        default_factory=default_factory,
+        frozen=False,
+    )
+
+
+def StateConstant(
+    default: Any = Unset,
+    default_factory: Callable[[], Any] | None = Unset,
+):
+    return Field(
+        default=default,
+        default_factory=default_factory,
+        frozen=True,
+    )
 
 
 class Atomic(Model):
