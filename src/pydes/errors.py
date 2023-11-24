@@ -12,3 +12,7 @@ class InvalidInputError(Exception):
 
 class InvalidOutputError(Exception):
     ...
+
+
+class SimulationError(Exception):
+    ...
