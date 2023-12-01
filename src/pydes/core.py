@@ -13,6 +13,7 @@ type Time = Annotated[float, Ge(0)]
 
 SEED = 12345
 INFINITY = inf
+NULL_ID = UUID(int=0)
 
 random = Generator(PCG64DXSM(SEED))
 
@@ -39,7 +40,7 @@ class Serializable(BaseModel):
 
     @classmethod
     def model_deserialize(cls, data: bytes) -> Self:
-        return pickle.loads(data)
+        return deserialize(data)
 
 
 class Mutable(Serializable):
